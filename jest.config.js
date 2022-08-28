@@ -4,6 +4,7 @@ module.exports = {
       'esbuild-jest',
       {
         sourcemap: true,
+        target: 'ESNext',
       },
     ],
   },
@@ -11,4 +12,5 @@ module.exports = {
   collectCoverage: true,
   coverageDirectory: 'coverage',
   coverageProvider: 'v8',
+  setupFilesAfterEnv: ['jest-extended/all'],
 };

@@ -70,7 +70,7 @@ module.exports = {
         allowAllPropertiesOnSameLine: false,
       },
     ],
-    '@typescript-eslint/no-explicit-any': 'error',
+    // '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/member-delimiter-style': [
       'error',
       {
