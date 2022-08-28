@@ -1,0 +1,3 @@
+# Runtime Type Check [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/aiden271828/runtime-type-check/blob/main/LICENSE) [![npm](https://img.shields.io/npm/v/runtime-type-check.svg)](https://www.npmjs.com/package/runtime-type-check) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/aiden271828/runtime-type-check/pulls)
+
+It allows you to check a type with Typescript syntax at javascript runtime.
