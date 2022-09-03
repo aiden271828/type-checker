@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 /**
  * 转义符
  */
@@ -440,6 +439,7 @@ const splitAstriction = (rawAstriction: string, breakPoints: string[]): string[]
           inputIndex = inputRightIndex;
         }
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const err: never = wrap;
         levelIndex = NaN;
       }
@@ -615,6 +615,7 @@ const checkPrimitiveAT = (val: any, {
       return tag === '[object BigInt]';
     }
     default: {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const err: 'object' = type;
       return false;
     }
@@ -916,6 +917,7 @@ const typeChecker = (val: any, att: AbstractTypeTree, option: CheckOption): bool
         return true;
       }
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const err: never = node;
       throw new TypeError('');
     }
