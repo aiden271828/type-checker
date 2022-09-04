@@ -13,6 +13,7 @@ module.exports = {
   },
   plugins: ['@typescript-eslint'],
   rules: {
+    'no-void': 0,
     'no-var': 'error',
     'prefer-const': 'error',
     semi: [
@@ -25,7 +26,7 @@ module.exports = {
     ],
     complexity: [
       'error',
-      20,
+      50,
     ],
     indent: [
       'error',

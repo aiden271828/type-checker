@@ -1,3 +1,16 @@
+import {
+  IndexSignatureParameterType,
+  Primitive,
+} from './types';
+
+/**
+ * 标识符
+ * 所谓标识符，就是变量、函数、属性或函数参数的名称。标识符可以由一或多个下列字符组成：
+ * 第一个字符必须是一个字母、下划线（_）或美元符号（$）；
+ * 剩下的其他字符可以是字母、下划线、美元符号或数字。
+ * 标识符中的字母可以是扩展ASCII（Extended ASCII）中的字母，也可以是Unicode的字母字符，如À和Æ（但不推荐使用）。
+ */
+const IDENTIFIER = /^[_a-zA-Z$][_a-zA-Z$\d]*$/;
 /**
  * 转义符
  */
@@ -482,8 +495,6 @@ const splitAstriction = (rawAstriction: string, breakPoints: string[]): string[]
   return ans;
 };
 
-type Primitive = 'never' | 'string' | 'number' | 'bigint' | 'boolean' | 'symbol' | 'undefined' | 'object' | 'any' | 'null';
-
 interface AstrictionOption {
   primitive: Set<Primitive>;
   checkVariableName: (v: string) => boolean;
@@ -502,7 +513,8 @@ interface ArrayAT<T> {
 }
 interface ObjectAT<T> {
   classification: 'object';
-  type: Map<string, {
+  mappedTypes: Record<IndexSignatureParameterType, T | null>;
+  type: Map<string|symbol, {
     type: T;
     isRequired: boolean;
   }>;
@@ -513,7 +525,7 @@ interface TupleAT<T> {
 }
 interface EnumerationAT {
   classification: 'enumeration';
-  type: string | number | true | false;
+  type: string | number | boolean;
 }
 /**
  * 抽象类型树
@@ -578,18 +590,182 @@ const isTupleAT = (v: AbstractTypeTree[number]): v is TupleAT<AbstractTypeTree> 
 const isEnumerationAT = (v: AbstractTypeTree[number]): v is EnumerationAT => {
   return v.classification === 'enumeration';
 };
+// https://www.typescriptlang.org/docs/handbook/type-compatibility.html#any-unknown-object-void-undefined-null-and-never-assignability
+/**
+ * 可分配性
+ * a可以分配给b
+ * 即 const foo:b = bar as a 成立
+ */
+const assignabilityTo = (a:PrimitiveAT, b:PrimitiveAT):boolean => {
+  const aType = a.type;
+  const bType = b.type;
+  const _ = (arg:Primitive):Record<Primitive, boolean> => {
+    const ans = {
+      any: true,
+      unknown: true,
+      object: false,
+      void: false,
+      never: false,
+      string: false,
+      number: false,
+      bigint: false,
+      boolean: false,
+      undefined: false,
+      null: false,
+      symbol: false,
+    };
+    ans[arg] = true;
+    return ans;
+  };
+  const map:Record<Primitive, Record<Primitive, boolean>> = {
+    any: {
+      any: true,
+      unknown: true,
+      object: true,
+      void: true,
+      never: false,
+      string: true,
+      number: true,
+      bigint: true,
+      boolean: true,
+      undefined: true,
+      null: true,
+      symbol: true,
+    },
+    unknown: _('unknown'),
+    object: _('object'),
+    void: _('void'),
+    never: {
+      any: true,
+      unknown: true,
+      object: true,
+      void: true,
+      never: true,
+      string: true,
+      number: true,
+      bigint: true,
+      boolean: true,
+      undefined: true,
+      null: true,
+      symbol: true,
+    },
+    string: _('string'),
+    number: _('number'),
+    bigint: _('bigint'),
+    boolean: _('boolean'),
+    undefined: _('undefined'),
+    null: _('null'),
+    symbol: _('symbol'),
+  };
+  return map[aType][bType];
+};
+/**
+ * a是否包含b
+ */
+const includeTo = (a:AbstractTypeTree, b:AbstractTypeTree):boolean => {
+  const aPrimitiveATList = a.filter(e => isPrimitiveAT(e)) as PrimitiveAT[];
+
+  const aHasPrimitiveAT = (arg:Primitive[]):boolean => {
+    return aPrimitiveATList.some(e => arg.includes(e.type));
+  };
+  for (const type of b) {
+    if (isPrimitiveAT(type)) {
+      const flag = aPrimitiveATList.some(e => assignabilityTo(type, e));
+      if (!flag) return false;
+    } else if (isArrayAT(type)) {
+      const aArrayATList = a.filter(e => isArrayAT(e)) as ArrayAT<AbstractTypeTree>[];
+      const flag = aHasPrimitiveAT([
+        'any',
+        'unknown',
+        'object',
+      ]) || aArrayATList.some(e => includeTo(e.type, type.type));
+      if (!flag) return false;
+    } else if (isObjectAT(type)) {
+      const aObjectATList = a.filter(e => isObjectAT(e)) as ObjectAT<AbstractTypeTree>[];
+      const flag = aHasPrimitiveAT([
+        'any',
+        'unknown',
+        'object',
+      ]) || aObjectATList.some((target) => {
+        for (const [
+          key,
+          currentType,
+        ] of type.type) {
+          if (target.type.has(key)) {
+            const targetType = target.type.get(key)!;
+            if (targetType.isRequired && !currentType.isRequired) {
+              return false;
+            }
+
+            if (!includeTo(targetType.type, currentType.type)) {
+              return false;
+            } else {
+              continue;
+            }
+          } else {
+            return false;
+          }
+        }
+        return true;
+      });
+      if (!flag) return false;
+    } else if (isTupleAT(type)) {
+      const aTupleATList = a.filter(e => isTupleAT(e)) as TupleAT<AbstractTypeTree>[];
+      const aArrayATList = a.filter(e => isArrayAT(e)) as ArrayAT<AbstractTypeTree>[];
+
+      const flag = aTupleATList.some((targetType) => {
+        if (targetType.type.length !== type.type.length) {
+          return false;
+        }
+        for (let i = 0; i < type.type.length; i++) {
+          if (!includeTo(targetType.type[i], type.type[i])) {
+            return false;
+          }
+        }
+        return true;
+      }) || aArrayATList.some(e => includeTo([e], [{
+        classification: 'array',
+        type: type.type.flat().map(e => {
+          if (isEnumerationAT(e)) {
+            const target:PrimitiveAT = {
+              classification: 'primitive',
+              type: typeof e.type as 'string' | 'number' | 'boolean',
+            };
+            return target;
+          } else {
+            return e;
+          }
+        }),
+      }]));
+      if (!flag) return false;
+    } else if (isEnumerationAT(type)) {
+      const aEnumerationATList = a.filter(e => isEnumerationAT(e)) as EnumerationAT[];
+      const p = typeof type.type as 'string' | 'number' | 'boolean';
+      const flag = aHasPrimitiveAT([p]) || aEnumerationATList.some((target) => {
+        return target.type === type.type;
+      });
+      if (!flag) return false;
+    } else {
+      const err: never = type;
+      throw new TypeError(err);
+    }
+  }
+  return true;
+};
 /**
  * 校验变量的值是否是特定的原始数据类型
  */
 const checkPrimitiveAT = (val: any, {
   type,
 }: PrimitiveAT): boolean => {
-  if (type === 'any') {
+  if (type === 'any' || type === 'unknown') {
     return true;
   } else if (type === 'never') {
     return false;
   } else if (type === 'object') {
     return val instanceof Object;
+  } else if (type === 'void') {
+    return val === null || val === void (0);
   }
   const tag = Object.prototype.toString.call(val);
   switch (type) {
@@ -647,12 +823,22 @@ const checkObjectAT = (val: any, node: ObjectAT<AbstractTypeTree>, option: Check
   } = option;
   const {
     type: typeMap,
+    mappedTypes,
   } = node;
 
-  const path = new Map(Object.keys(val).map(key => ([
-    key,
-    false,
-  ])));
+  const getSymbolKeys = (v:object):symbol[] => {
+    return Object.getOwnPropertySymbols(v).filter(key => {
+      return Object.getOwnPropertyDescriptor(v, key)!.enumerable;
+    });
+  };
+  const paths = new Map<string|symbol, boolean>();
+
+  for (const key of Object.keys(val)) {
+    paths.set(key, false);
+  }
+  for (const key of getSymbolKeys(val)) {
+    paths.set(key, false);
+  }
 
   if (isStructuralTyping) {
     for (const [
@@ -661,7 +847,7 @@ const checkObjectAT = (val: any, node: ObjectAT<AbstractTypeTree>, option: Check
         isRequired,
       },
     ] of typeMap) {
-      if (isRequired && !path.has(key)) {
+      if (isRequired && !paths.has(key)) {
         return false;
       }
     }
@@ -672,31 +858,75 @@ const checkObjectAT = (val: any, node: ObjectAT<AbstractTypeTree>, option: Check
         isRequired,
       },
     ] of typeMap) {
-      const isExist = path.has(key);
-      if (isRequired && !isExist) {
+      const isExist = paths.has(key);
+      if (!isExist) {
+        if (isRequired) {
+          return false;
+        } else {
+          continue;
+        }
+      } else {
+        paths.set(key, true);
+      }
+    }
+    const missKeys = [...paths].filter(([
+      , v,
+    ]) => !v).map(([k]) => k);
+
+    if (missKeys.length > 0) {
+      let symbolCount = 0;
+      let stringCount = 0;
+      let numberCount = 0;
+      for (const key of missKeys) {
+        if (typeof key === 'string') {
+          stringCount++;
+          if (isKeyOfNumberIndexSignature(key)) {
+            numberCount++;
+          }
+        } else {
+          symbolCount++;
+        }
+      }
+      if (mappedTypes.symbol) {
+        symbolCount = 0;
+      }
+
+      if (mappedTypes.string) {
+        stringCount = 0;
+        numberCount = 0;
+      } else if (mappedTypes.number) {
+        stringCount -= numberCount;
+        numberCount = 0;
+      }
+
+      if (symbolCount !== 0 ||
+        stringCount !== 0 ||
+        numberCount !== 0
+      ) {
         return false;
       }
-      if (!isExist) {
-        continue;
-      }
-      path.set(key, true);
-    }
-    if (Array.from(path.values()).some(e => !e)) {
-      return false;
     }
   }
 
-  for (const [
-    key,
-    {
-      type: att,
-    },
-  ] of typeMap) {
-    if (!Object.prototype.hasOwnProperty.call(val, key)) {
-      continue;
-    }
-    if (!typeChecker(val[key], att, option)) {
-      return false;
+  for (const [key] of paths) {
+    if (typeMap.has(key)) {
+      if (!typeChecker(val[key], typeMap.get(key)!.type, option)) {
+        return false;
+      }
+    } else if (typeof key === 'string' && (mappedTypes.string || mappedTypes.number)) {
+      if (mappedTypes.number && isKeyOfNumberIndexSignature(key)) {
+        if (!typeChecker(val[key], mappedTypes.number, option)) {
+          return false;
+        }
+      } else if (mappedTypes.string) {
+        if (!typeChecker(val[key], mappedTypes.string, option)) {
+          return false;
+        }
+      }
+    } else if (typeof key === 'symbol' && mappedTypes.symbol) {
+      if (!typeChecker(val[key], mappedTypes.symbol, option)) {
+        return false;
+      }
     }
   }
   return true;
@@ -759,6 +989,9 @@ export function parseArrayAT (formatAstriction: string, option: AstrictionOption
   }
   return at;
 }
+const isKeyOfNumberIndexSignature = (key:string):boolean => {
+  return /^((-?[1-9]\d*)|0)$/.test(key);
+};
 /**
  * 如果传入字符串不能解析为对象将报一个TypeError类型的错误
  */
@@ -771,6 +1004,11 @@ export function parseObjectAT (formatAstriction: string, option: AstrictionOptio
   } = option;
   const type: ObjectAT<AbstractTypeTree>['type'] = new Map();
   const at: ReturnType<typeof parseObjectAT> = {
+    mappedTypes: {
+      symbol: null,
+      string: null,
+      number: null,
+    },
     classification: 'object',
     type,
   };
@@ -788,24 +1026,66 @@ export function parseObjectAT (formatAstriction: string, option: AstrictionOptio
     astrictionBuffer = astrictionBuffer.slice(0, -1);
   }
   for (const structure of splitAstriction(astrictionBuffer, breakPoints)) {
-    const index: number = structure.indexOf(':');
+    const i: number = structure.indexOf(':');
+
+    // Mapped Types
+    if (/^\[([_a-zA-Z$][_a-zA-Z$\d]*):(symbol|string|number)\]:[^:]+$/.test(structure)) {
+      const j:number = structure.indexOf(':', i + 1);
+      const t = structure.slice(i + 1, j - 1) as 'symbol'|'string'|'number';
+      if (at.mappedTypes[t] !== null) {
+        throw new TypeError('');
+      }
+      at.mappedTypes[t] = parseFormatAstriction(structure.slice(j + 1), option);
+      continue;
+    }
+
     // 无法解析出变量名和类型
-    if (index === -1) {
+    if (i === -1) {
       throw new TypeError('');
     }
-    const isRequired: boolean = structure[index - 1] !== '?';
-    const variableName: string = structure.slice(0, isRequired ? index : index - 1);
+    const isRequired: boolean = structure[i - 1] !== '?';
+    const variableName: string = structure.slice(0, isRequired ? i : i - 1);
     // 变量名不合法
     if (!checkVariableName(variableName)) {
       throw new TypeError('');
     }
     type.set(variableName, {
       isRequired,
-      type: parseFormatAstriction(structure.slice(index + 1), option),
+      type: parseFormatAstriction(structure.slice(i + 1), option),
     });
   }
-  if (type.size === 0) {
+  // 验证AT是不是合规
+  // 1.size
+  // if (type.size === 0) {
+  //   throw new TypeError('');
+  // }
+  // 2.Mapped Types
+  // string 必须包含number
+  if (at.mappedTypes.string && at.mappedTypes.number && !includeTo(at.mappedTypes.string, at.mappedTypes.number)) {
     throw new TypeError('');
+  }
+  // 如果存在mapped tyes 判断键是否合法
+  for (const [
+    k,
+    v,
+  ] of at.type) {
+    if (typeof k === 'string') {
+      if (isKeyOfNumberIndexSignature(k) && at.mappedTypes.number) {
+        if (!includeTo(at.mappedTypes.number, v.type)) {
+          throw new TypeError('');
+        }
+      } else if (at.mappedTypes.string) {
+        if (!includeTo(at.mappedTypes.string, v.type)) {
+          throw new TypeError('');
+        }
+      }
+    } else {
+      if (at.mappedTypes.symbol) {
+        if (!includeTo(at.mappedTypes.symbol, v.type)) {
+          throw new TypeError('');
+        }
+      }
+    }
   }
   return at;
 };
@@ -816,7 +1096,7 @@ export function parseTupleAT (formatAstriction: string, option: AstrictionOption
   }
   const at: ReturnType<typeof parseTupleAT> = {
     classification: 'tuple',
-    type: splitAstriction(formatAstriction.slice(1, -1), [',']).map(e => parseFormatAstriction(e, option)),
+    type: formatAstriction === '[]' ? [] : splitAstriction(formatAstriction.slice(1, -1), [',']).map(e => parseFormatAstriction(e, option)),
   };
   return at;
 }
@@ -949,14 +1229,7 @@ export const JSON_PRIMITIVE: Set<Primitive> = new Set([
   'null',
 ]);
 export const DEFAULT_CHECK_VARIABLE_NAME: AstrictionOption['checkVariableName'] = (v: string) => {
-  /**
-   * 标识符
-   * 所谓标识符，就是变量、函数、属性或函数参数的名称。标识符可以由一或多个下列字符组成：
-   * 第一个字符必须是一个字母、下划线（_）或美元符号（$）；
-   * 剩下的其他字符可以是字母、下划线、美元符号或数字。
-   * 标识符中的字母可以是扩展ASCII（Extended ASCII）中的字母，也可以是Unicode的字母字符，如À和Æ（但不推荐使用）。
-   */
-  return /^[_a-zA-Z$][_a-zA-Z$\d]*$/.test(v);
+  return IDENTIFIER.test(v);
 };
 
 interface CheckAstrictionOption {

@@ -15,7 +15,7 @@
   "bugs": "https://github.com/aiden271828/runtime-type-check/issues",
   "scripts": {
     "test": "jest",
-    "start": "rollup --config rollup.config.ts --configPlugin typescript --watch",
+    "start": "jest --watch",
     "build": "rimraf lib && rollup --config rollup.config.ts --configPlugin typescript && npm run build:types",
     "build:types": "rimraf temp && tsc src/index.ts --declaration --emitDeclarationOnly --declarationMap --outDir temp && api-extractor run --local --verbose && rimraf temp",
     "lint": "eslint . --ext .ts,.js --fix",
